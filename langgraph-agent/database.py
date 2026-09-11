@@ -79,12 +79,33 @@ COMPANY_INFO: list[dict[str, Any]] = [
         ),
     },
     {
+        "id": "gluten-free-crust",
+        "title": "Gluten-free crust",
+        "tags": [
+            "gluten",
+            "gluten-free",
+            "glutenfree",
+            "celiac",
+            "wheat",
+            "crust",
+            "crusts",
+            "size",
+            "sizes",
+        ],
+        "content": (
+            "Gluten-free crust is available in all three sizes - small, medium, "
+            "and large - for $3.00 extra. It is a rice and tapioca flour blend, "
+            "par-baked before it is topped. The dough is prepped in the same "
+            "kitchen as our regular dough, so we cannot promise a celiac-safe "
+            "pizza."
+        ),
+    },
+    {
         "id": "allergens",
         "title": "Allergens & dietary options",
         "tags": [
             "allergen",
             "allergy",
-            "gluten",
             "vegan",
             "vegetarian",
             "dairy",
@@ -92,11 +113,11 @@ COMPANY_INFO: list[dict[str, Any]] = [
             "celiac",
         ],
         "content": (
-            "Gluten-free crust is available on small and medium pizzas for "
-            "$3.00 extra. Vegan cheese is available for $2.00 extra. Our "
-            "kitchen handles wheat, dairy, and soy, so we cannot guarantee an "
-            "allergen-free environment for guests with celiac disease or "
-            "severe allergies. Full allergen sheets are posted in store."
+            "Gluten-free crust is available for $3.00 extra. Vegan cheese is "
+            "available for $2.00 extra. Our kitchen handles wheat, dairy, and "
+            "soy, so we cannot guarantee an allergen-free environment for "
+            "guests with celiac disease or severe allergies. Full allergen "
+            "sheets are posted in store."
         ),
     },
     {
@@ -105,8 +126,10 @@ COMPANY_INFO: list[dict[str, Any]] = [
         "tags": ["loyalty", "rewards", "points", "coupon", "discount", "deal"],
         "content": (
             "The Slice Stack rewards program gives 1 point per dollar spent. "
-            "100 points earns a free large one-topping pizza. Students get 10% "
-            "off with a valid ID on weekdays before 4pm."
+            "100 points earns a free large one-topping pizza. Points expire 12 "
+            "months after they are earned, and catering and party-tray orders "
+            "do not earn points. Students get 10% off with a valid ID on "
+            "weekdays before 4pm."
         ),
     },
     {
