@@ -51,10 +51,24 @@ calls appear as `claude.assistant.turn` and tools carry their MCP prefix, as in
 ## Setup
 
 ```bash
-cp .env.example .env      # then add your LANGSMITH_API_KEY and OPENAI_API_KEY
+cp .env.example .env      # then choose the credentials for your harness below
 ```
 
 `.env` lives at the repo root and both agent folders read it.
+
+### Choose local chat authentication
+
+- **Direct provider (default):** `langgraph-agent/` uses `OPENAI_API_KEY` for its default OpenAI model
+- **LangSmith LLM Gateway:** for `langgraph-agent/`, set `LANGSMITH_GATEWAY=true` and `LANGSMITH_API_KEY`. Your workspace administrator must configure the OpenAI provider secret and grant model access. You can leave `OPENAI_API_KEY` unset locally
+- **Claude Agent SDK:** `claude-sdk-agent/` still needs its own `claude` CLI login or `ANTHROPIC_API_KEY`. `LANGSMITH_GATEWAY` configures LangChain integrations, not this harness
+
+For a separate gateway credential, set `LANGSMITH_GATEWAY_API_KEY`; it overrides `LANGSMITH_API_KEY` for gateway chat only. Tracing and the LangSmith dataset and evaluation APIs still need `LANGSMITH_API_KEY`. Turning tracing off does not disable gateway chat, and a gateway-only key does not enable tracing.
+
+For another region, set `LANGSMITH_GATEWAY` to a gateway base URL such as `https://eu.gateway.smith.langchain.com`, `https://apac.gateway.smith.langchain.com`, or `https://aws.gateway.smith.langchain.com`. The integration appends `/openai/v1`; do not include it yourself. `LANGSMITH_ENDPOINT` selects the tracing/API region separately. Unset provider base URL overrides to use automatic gateway routing. See [direct model access](https://docs.langchain.com/langsmith/llm-gateway-direct-model-access).
+
+Unset `LANGSMITH_GATEWAY`, or set it to `false`, `0`, `no`, or an empty value, to return to direct provider access. You can export these variables in your shell without creating `.env`. If `.env` exists, this repository loads it with `override=True`, so file values win over shell values. Restart running agents after changes.
+
+### Install and check
 
 Each project has its own `pyproject.toml`, `uv.lock`, and `.venv`. Set up the one you
 plan to use:
@@ -67,6 +81,16 @@ uv run python check_setup.py
 
 `check_setup.py` reports whether your keys load, then checks the packages for whichever
 project you ran it from. There is nothing to install at the repo root.
+
+The checker reports missing, empty, and placeholder credentials for the selected harness and mode. It checks presence, not whether a key is valid. After `uv sync`, you can verify gateway chat with no local provider keys from `langgraph-agent/`:
+
+```bash
+uv run python run_agent.py -m "What pizzas do you have?"
+```
+
+With `LANGSMITH_GATEWAY=true` and a working gateway key, the agent replies without `OPENAI_API_KEY`. Authentication or access errors still need a valid key for the right region, a workspace provider secret, and permission to use the selected model.
+
+### Configure server-side evaluations
 
 Later in the course, LangSmith calls a model itself. So `OPENAI_API_KEY` also needs to be
 a workspace secret in LangSmith, under **Settings → Provider secrets**. This is the one
@@ -176,7 +200,9 @@ Shared, in the root `.env`:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `LANGSMITH_TRACING` | true | Set `true` to turn tracing on |
-| `LANGSMITH_API_KEY` | none | Required when tracing |
+| `LANGSMITH_API_KEY` | none | Required for tracing and LangSmith API operations; fallback gateway credential |
+| `LANGSMITH_GATEWAY` | unset | Enable LangChain gateway chat with `true` or a regional gateway base URL |
+| `LANGSMITH_GATEWAY_API_KEY` | unset | Optional gateway-only key override; not a tracing key |
 | `LANGSMITH_PROJECT` | `langslice-pizza-agent` | Project the traces land in |
 | `LANGSMITH_ENDPOINT` | US | Uncomment your region's endpoint outside the US |
 | `DATASET_NAME` | `langslice-dataset` | Dataset used by `eval.py` |
@@ -185,7 +211,7 @@ Shared, in the root `.env`:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `OPENAI_API_KEY` | none | Required |
+| `OPENAI_API_KEY` | none | Required for direct local OpenAI chat, not gateway chat |
 | `PIZZA_AGENT_MODEL` | `openai:gpt-5-nano` | Model id, passed to `init_chat_model` |
 | `PIZZA_AGENT_REASONING_EFFORT` | `low` | Applies to gpt-5 models. Leave empty to unset |
 

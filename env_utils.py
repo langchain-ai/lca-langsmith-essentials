@@ -19,19 +19,6 @@ import re
 from pathlib import Path
 
 
-# Placeholder substrings that indicate a value still needs to be filled in.
-# This project's .env.example uses styles like "your-openai-api-key" and "lsv2_...".
-_PLACEHOLDER_MARKERS = ("your_", "your-", "_here", "...")
-
-
-def _is_placeholder(value: str) -> bool:
-    """Return True if a value looks like an unfilled example/placeholder."""
-    if not value:
-        return False
-    lowered = value.lower()
-    return any(marker in lowered for marker in _PLACEHOLDER_MARKERS)
-
-
 # ========== EARLY PYTHON ENVIRONMENT DIAGNOSTICS ==========
 def check_python_executable_and_version():
     """
@@ -199,16 +186,7 @@ def summarize_value(key: str, value: str, example_value: str = None) -> str:
 
 
 def _parse_required_keys(example_file_path: str) -> dict:
-    """Parse .env.example to identify required keys and their example values.
-
-    This project's .env.example marks required keys simply by leaving them
-    uncommented; optional alternatives (e.g. ANTHROPIC_API_KEY, GOOGLE_API_KEY,
-    LANGSMITH_ENDPOINT) are commented out. So every uncommented KEY=VALUE line is
-    treated as required.
-
-    Returns:
-        dict mapping key names to their example/placeholder values
-    """
+    """Read required values, excluding defaults and inactive authentication paths."""
     required_keys = {}
     with open(example_file_path, 'r') as f:
         for line in f:
@@ -223,6 +201,14 @@ def _parse_required_keys(example_file_path: str) -> dict:
                 elif value.startswith('"') and value.endswith('"'):
                     value = value[1:-1]
                 required_keys[key] = value
+    for key in ("OPENAI_API_KEY", "LANGSMITH_TRACING", "LANGSMITH_PROJECT", "DATASET_NAME"):
+        required_keys.pop(key, None)
+    if os.getenv("LANGSMITH_TRACING", "").lower() in {"true", "1", "yes"}:
+        required_keys.setdefault("LANGSMITH_API_KEY", "")
+    else:
+        required_keys.pop("LANGSMITH_API_KEY", None)
+    for key in _model_required_keys():
+        required_keys.setdefault(key, "")
     return required_keys
 
 
@@ -253,7 +239,7 @@ def check_env_file_exists(env_file_path: str = ".env", example_file_path: str = 
         sys_val = os.environ.get(key)
         if sys_val is not None:
             # Check if it's still a placeholder value
-            if _is_placeholder(sys_val):
+            if _is_unfilled(sys_val):
                 missing.append(key)
             else:
                 found[key] = sys_val
@@ -422,93 +408,90 @@ def check_manual_installs(file_path: str):
     print()
 
 
-def doublecheck_env(file_path: str):
-    """Check environment variables against a .env.example file and print summaries.
+def _gateway_enabled() -> bool:
+    """Match the LangChain integrations' gateway flag semantics."""
+    value = os.getenv("LANGSMITH_GATEWAY", "")
+    return bool(value) and value.lower() not in {"false", "0", "no"}
 
-    Args:
-        file_path: Path to the .env.example file to check against
-    """
+
+def _is_unfilled(value: str | None) -> bool:
+    """Recognize missing, empty, and example credentials without validating secrets."""
+    value = (value or "").strip().lower()
+    return not value or value == "****" or any(
+        marker in value for marker in ("your_", "your-", "_here", "...", "<", ">")
+    )
+
+
+def _model_required_keys() -> set[str]:
+    """Select credentials for the active local chat setup."""
+    project = _active_project(_projects())
+    if project is not None and project.name == "claude-sdk-agent":
+        return {"ANTHROPIC_API_KEY"} if "ANTHROPIC_API_KEY" in os.environ else set()
+    if project is None:
+        return set()
+    if not _gateway_enabled():
+        return {"OPENAI_API_KEY"}
+    override = os.getenv("LANGSMITH_GATEWAY_API_KEY")
+    return {"LANGSMITH_GATEWAY_API_KEY" if override else "LANGSMITH_API_KEY"}
+
+
+def _check_model_environment() -> list[str]:
+    """Report routing configuration separately from credential presence."""
+    issues = []
+    project = _active_project(_projects())
+    if project is not None and project.name == "claude-sdk-agent":
+        return issues
+    if _gateway_enabled():
+        gateway = os.environ["LANGSMITH_GATEWAY"]
+        if gateway.lower() not in {"true", "1", "yes"}:
+            from urllib.parse import urlsplit
+
+            try:
+                parsed = urlsplit(gateway)
+                valid = parsed.scheme in {"http", "https"} and bool(parsed.hostname)
+            except ValueError:
+                valid = False
+            if not valid:
+                issues.append("LANGSMITH_GATEWAY must be true or a gateway base URL (or false, 0, no to disable)")
+        for key in ("OPENAI_API_BASE", "OPENAI_BASE_URL", "ANTHROPIC_API_URL", "ANTHROPIC_BASE_URL"):
+            if os.getenv(key):
+                issues.append(f"{key} overrides automatic gateway routing; unset it to use LANGSMITH_GATEWAY")
+        print("LangChain chat mode: LangSmith LLM Gateway (no local provider key needed for supported chat models)")
+    else:
+        print("LangChain chat mode: direct provider (default)")
+    return issues
+
+
+def doublecheck_env(file_path: str):
+    """Check the loaded environment using mode-aware credential requirements."""
     if not os.path.exists(file_path):
         print(f"Did not find file {file_path}.")
-        print("This is used to double check the key settings for this project.")
-        print("This is just a check and is not required.\n")
         return
-
-    # Parse the example file to identify required keys and their example values
-    required_keys = _parse_required_keys(file_path)
-    all_example_values = {}
-    with open(file_path, 'r') as f:
-        for line in f:
-            stripped = line.strip()
-            if '=' in stripped and not stripped.startswith('#'):
-                key = stripped.split('=')[0].strip()
-                value = stripped.split('=', 1)[1].strip()
-                if value.startswith("'") and value.endswith("'"):
-                    value = value[1:-1]
-                elif value.startswith('"') and value.endswith('"'):
-                    value = value[1:-1]
-                all_example_values[key] = value
-
-    # Parse the example file to get all keys
-    parsed = dotenv_values(file_path)
-    issues = []
-
-    print("Environment Variables:")
-    printed_keys = set()
-
-    for key in parsed.keys():
+    example_values = dict(dotenv_values(file_path))
+    required = set(_parse_required_keys(file_path))
+    if os.getenv("LANGSMITH_TRACING", "").lower() in {"true", "1", "yes"}:
+        required.add("LANGSMITH_API_KEY")
+        print("Tracing requires LANGSMITH_API_KEY separately from any gateway override.")
+    keys = set(example_values) | required | {"LANGSMITH_GATEWAY", "LANGSMITH_GATEWAY_API_KEY"}
+    issues = _check_model_environment()
+    print("Environment variables (presence check only; credentials are not authenticated):")
+    for key in sorted(keys):
         current = os.getenv(key)
-        example_val = all_example_values.get(key)
-
-        if current is not None:
-            # Use the new summarize_value with key, value, and example_value
-            print(f"{key}={summarize_value(key, current, example_val)}")
-
-            # Check if this required key still has the example/placeholder value
-            # Only flag values that look like actual placeholders (e.g. "your-...", "lsv2_...")
-            if key in required_keys:
-                if current == example_val and _is_placeholder(example_val):
-                    issues.append(f"  ⚠️  {key} still has the example/placeholder value")
-        else:
-            print(f"{key}=<not set>")
-            if key in required_keys:
-                issues.append(f"  ⚠️  {key} is required but not set")
-
-        printed_keys.add(key)
-
-    # Check for any additional uncommented variables in .env that weren't in .env.example
-    actual_env_file = ".env"
-    if os.path.exists(actual_env_file):
-        actual_env_vars = dotenv_values(actual_env_file)
-        additional_vars = set(actual_env_vars.keys()) - printed_keys
-
-        if additional_vars:
-            print("\nAdditional variables in .env (not in .env.example):")
-            for key in sorted(additional_vars):
-                current = os.getenv(key)
-                if current is not None:
-                    # No example value to compare against for additional vars
-                    print(f"{key}={summarize_value(key, current, None)}")
-                else:
-                    print(f"{key}=<not set>")
-
-    # Special check for LangSmith tracing
-    langsmith_tracing = os.getenv("LANGSMITH_TRACING", "").lower()
-    langsmith_api_key = os.getenv("LANGSMITH_API_KEY", "")
-    langsmith_example = all_example_values.get("LANGSMITH_API_KEY", "")
-
-    if langsmith_tracing == "true":
-        # Check if API key is missing, empty, or still has the example value
-        if not langsmith_api_key:
-            issues.append(f"  ⚠️  LANGSMITH_TRACING is enabled but LANGSMITH_API_KEY is not set")
-        elif langsmith_api_key == langsmith_example or _is_placeholder(langsmith_api_key):
-            issues.append(f"  ⚠️  LANGSMITH_TRACING is enabled but LANGSMITH_API_KEY still has the example/placeholder value")
-
-    # Print any issues found
+        summary = summarize_value(key, current, example_values.get(key)) if current is not None else "<not set>"
+        print(f"{key}={summary}")
+        if key in required and _is_unfilled(current):
+            issues.append(f"{key} is required but missing, empty, or a placeholder")
+    project = _active_project(_projects())
+    if project is None or project.name == "claude-sdk-agent":
+        print("Claude Agent SDK: CLI login is not checked here; authenticate with a claude CLI login or ANTHROPIC_API_KEY; LANGSMITH_GATEWAY does not configure this harness.")
+    print("Server-side evaluations: configure the OpenAI provider secret in LangSmith separately; local gateway credentials do not replace it.")
+    print("LangSmith datasets and evaluations also require LANGSMITH_API_KEY, even with tracing disabled.")
     if issues:
         print("\nIssues found:")
         for issue in issues:
-            print(issue)
+            print(f"  {issue}")
+    else:
+        print("\nRequired environment values for checked paths are set (authentication is not verified).")
     print()
 
 

@@ -90,7 +90,6 @@ async def config(request: Request) -> JSONResponse:
             "model": MODEL_NAME,
             "tracing": _tracing_enabled(),
             "project": os.getenv("LANGSMITH_PROJECT", "default"),
-            "openai_key_set": bool(os.getenv("OPENAI_API_KEY")),
         }
     )
 

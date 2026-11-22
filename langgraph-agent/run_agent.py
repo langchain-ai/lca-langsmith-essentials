@@ -148,13 +148,6 @@ def main() -> int:
     parser.add_argument("--thread", help="conversation id (defaults to a fresh uuid)")
     args = parser.parse_args()
 
-    if not os.getenv("OPENAI_API_KEY"):
-        print(
-            "OPENAI_API_KEY is not set. Copy .env.example to .env and fill it in.",
-            file=sys.stderr,
-        )
-        return 1
-
     thread_id = args.thread or str(uuid.uuid4())
     tracing = os.getenv("LANGSMITH_TRACING", "").lower() in {"1", "true", "yes"}
 
