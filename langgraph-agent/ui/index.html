@@ -889,13 +889,6 @@
       el.tracing.innerHTML = config.tracing
         ? `Tracing to: <code>${escapeHtml(config.project)}</code>`
         : "Tracing: off";
-      if (!config.openai_key_set) {
-        addMessage("assistant",
-          '<div class="error-box"><code>OPENAI_API_KEY</code> is not set. ' +
-          "Copy <code>.env.example</code> to <code>.env</code> and fill it in.</div>");
-        el.send.disabled = true;
-        return;
-      }
     } catch (err) {
       addMessage("assistant", `<div class="error-box">Could not reach the server: <code>${escapeHtml(err.message)}</code></div>`);
       return;
